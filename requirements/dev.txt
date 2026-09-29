@@ -1,0 +1,4 @@
+-r spark.txt
+fastavro==1.9.7
+pytest==8.3.3
+ruff==0.6.9

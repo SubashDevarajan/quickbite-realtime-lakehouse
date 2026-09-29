@@ -1,0 +1,21 @@
+[project]
+name = "quickbite-realtime-lakehouse"
+version = "1.0.0"
+description = "Real-time order & clickstream lakehouse: Kafka, Spark Structured Streaming, Delta Lake"
+requires-python = ">=3.10"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = ["spark: needs a local SparkSession (Java 17 + pyspark)"]
+addopts = "-ra"
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
+ignore = ["E501", "B008"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["generator", "pipeline", "scripts", "tests", "dashboard"]

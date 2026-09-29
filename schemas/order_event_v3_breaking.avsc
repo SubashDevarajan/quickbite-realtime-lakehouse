@@ -1,0 +1,19 @@
+{
+  "type": "record",
+  "name": "OrderEvent",
+  "namespace": "com.quickbite.events",
+  "doc": "INTENTIONALLY BREAKING. Renames amount -> order_amount and adds a required field with no default. The Schema Registry must reject this under BACKWARD compatibility. Used by scripts/check_schema_compat.py.",
+  "fields": [
+    {"name": "event_id", "type": "string"},
+    {"name": "order_id", "type": "string"},
+    {"name": "customer_id", "type": "string"},
+    {"name": "session_id", "type": ["null", "string"], "default": null},
+    {"name": "restaurant_id", "type": "string"},
+    {"name": "zone", "type": "string"},
+    {"name": "status", "type": "string"},
+    {"name": "order_amount", "type": {"type": "bytes", "logicalType": "decimal", "precision": 10, "scale": 2}},
+    {"name": "event_ts", "type": {"type": "long", "logicalType": "timestamp-millis"}},
+    {"name": "payment_method", "type": ["null", "string"], "default": null},
+    {"name": "rider_id", "type": "string"}
+  ]
+}

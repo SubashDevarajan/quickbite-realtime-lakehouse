@@ -1,0 +1,23 @@
+{
+  "type": "record",
+  "name": "OrderEvent",
+  "namespace": "com.quickbite.events",
+  "doc": "v2: adds payment_method. BACKWARD compatible with v1 because the new field is optional with a default.",
+  "fields": [
+    {"name": "event_id", "type": "string", "doc": "Globally unique id; used for de-duplication"},
+    {"name": "order_id", "type": "string"},
+    {"name": "customer_id", "type": "string"},
+    {"name": "session_id", "type": ["null", "string"], "default": null,
+     "doc": "App session that produced the order; joins to clickstream"},
+    {"name": "restaurant_id", "type": "string"},
+    {"name": "zone", "type": "string", "doc": "Delivery zone, e.g. KORAMANGALA"},
+    {"name": "status", "type": "string",
+     "doc": "PLACED | ACCEPTED | PICKED_UP | DELIVERED | CANCELLED. Kept as string (not enum) so new states do not break old readers; validated in silver."},
+    {"name": "amount", "type": ["null", {"type": "bytes", "logicalType": "decimal", "precision": 10, "scale": 2}],
+     "default": null, "doc": "Order value in INR. Decimal, never float, for money."},
+    {"name": "event_ts", "type": {"type": "long", "logicalType": "timestamp-millis"},
+     "doc": "When the event happened on the device/service (event time)"},
+    {"name": "payment_method", "type": ["null", "string"], "default": null,
+     "doc": "UPI | CARD | COD | WALLET. Added in v2."}
+  ]
+}

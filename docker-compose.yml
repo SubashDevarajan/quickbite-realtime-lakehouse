@@ -1,0 +1,163 @@
+name: quickbite
+
+x-spark-job: &spark-job
+  build:
+    context: .
+    dockerfile: docker/spark/Dockerfile
+  image: quickbite-spark:latest
+  restart: unless-stopped # a crashed job restarts and resumes from its checkpoint
+  environment: &spark-env
+    KAFKA_BOOTSTRAP: kafka:9092
+    SCHEMA_REGISTRY_URL: http://schema-registry:8081
+    LAKE_ROOT: /data
+    METRICS_DIR: /data/metrics
+    SPARK_DRIVER_MEMORY: ${SPARK_DRIVER_MEMORY:-1g}
+    TRIGGER_INTERVAL: ${TRIGGER_INTERVAL:-10 seconds}
+    WATERMARK_DELAY: ${WATERMARK_DELAY:-2 minutes}
+    ORDER_SLA_SECONDS: ${ORDER_SLA_SECONDS:-240}
+  volumes:
+    - lakehouse:/data
+    - ./pipeline:/app/pipeline:ro # edit code, then `docker compose restart <job>`
+    - ./scripts:/app/scripts:ro
+  depends_on:
+    kafka-init:
+      condition: service_completed_successfully
+    schema-registry:
+      condition: service_healthy
+
+services:
+  # ------------------------------------------------------------ streaming infra
+  kafka:
+    image: apache/kafka:3.8.0
+    hostname: kafka
+    ports:
+      - "29092:29092" # for producers/consumers running on your laptop
+    environment:
+      CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk # any base64 UUID
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller # KRaft: no ZooKeeper
+      KAFKA_LISTENERS: INTERNAL://:9092,EXTERNAL://:29092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka:9092,EXTERNAL://localhost:29092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT,CONTROLLER:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+      KAFKA_LOG_RETENTION_HOURS: 168
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server kafka:9092 > /dev/null 2>&1"]
+      interval: 10s
+      timeout: 10s
+      retries: 12
+      start_period: 15s
+
+  kafka-init:
+    image: apache/kafka:3.8.0
+    depends_on:
+      kafka:
+        condition: service_healthy
+    volumes:
+      - ./scripts/create_topics.sh:/create_topics.sh:ro
+    entrypoint: ["/bin/bash", "/create_topics.sh"]
+    environment:
+      BOOTSTRAP: kafka:9092
+    restart: "no"
+
+  schema-registry:
+    image: confluentinc/cp-schema-registry:7.7.1
+    hostname: schema-registry
+    depends_on:
+      kafka:
+        condition: service_healthy
+    ports:
+      - "8081:8081"
+    environment:
+      SCHEMA_REGISTRY_HOST_NAME: schema-registry
+      SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS: PLAINTEXT://kafka:9092
+      SCHEMA_REGISTRY_LISTENERS: http://0.0.0.0:8081
+      SCHEMA_REGISTRY_SCHEMA_COMPATIBILITY_LEVEL: backward
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8081/subjects > /dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
+  kafka-ui:
+    image: provectuslabs/kafka-ui:v0.7.2
+    depends_on:
+      kafka:
+        condition: service_healthy
+    ports:
+      - "8080:8080"
+    environment:
+      KAFKA_CLUSTERS_0_NAME: quickbite-local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
+      KAFKA_CLUSTERS_0_SCHEMAREGISTRY: http://schema-registry:8081
+
+  # ------------------------------------------------------------------ producer
+  generator:
+    build:
+      context: .
+      dockerfile: docker/generator/Dockerfile
+    image: quickbite-generator:latest
+    depends_on:
+      kafka-init:
+        condition: service_completed_successfully
+      schema-registry:
+        condition: service_healthy
+    environment:
+      KAFKA_BOOTSTRAP: kafka:9092
+      SCHEMA_REGISTRY_URL: http://schema-registry:8081
+      SESSIONS_PER_SEC: ${SESSIONS_PER_SEC:-5}
+      SCHEMA_V2_AFTER_SEC: ${SCHEMA_V2_AFTER_SEC:-90}
+      DURATION_SEC: ${DURATION_SEC:-0}
+      MANIFEST_PATH: /data/generator/manifest.json
+    volumes:
+      - lakehouse:/data
+    stop_grace_period: 60s # time to release held late events + flush
+    restart: "no"
+
+  # ------------------------------------------------------------ pipeline jobs
+  bronze:
+    <<: *spark-job
+    command: ["python", "-m", "pipeline.jobs.bronze_ingest"]
+
+  silver:
+    <<: *spark-job
+    command: ["python", "-m", "pipeline.jobs.silver"]
+
+  gold:
+    <<: *spark-job
+    command: ["python", "-m", "pipeline.jobs.gold"]
+
+  # One-off commands: docker compose run --rm tools python -m <module>
+  tools:
+    <<: *spark-job
+    restart: "no"
+    profiles: ["tools"]
+    command: ["python", "-c", "print('use: docker compose run --rm tools python -m <module>')"]
+
+  # ----------------------------------------------------------------- serving
+  dashboard:
+    build:
+      context: .
+      dockerfile: docker/dashboard/Dockerfile
+    image: quickbite-dashboard:latest
+    ports:
+      - "8501:8501"
+    environment:
+      LAKE_ROOT: /data
+      METRICS_DIR: /data/metrics
+      MANIFEST_PATH: /data/generator/manifest.json
+    volumes:
+      - lakehouse:/data:ro
+      - ./dashboard:/app/dashboard:ro
+    restart: unless-stopped
+
+volumes:
+  lakehouse:
