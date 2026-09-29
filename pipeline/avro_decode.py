@@ -50,7 +50,7 @@ class RegistrySchemaResolver:
     def __init__(self, url: str, timeout_s: float = 5.0):
         self.url = url.rstrip("/")
         self.timeout_s = timeout_s
-        self._cache: dict[int, str | None] = {}
+        self._cache: dict[int, str] = {}
 
     def get(self, schema_id: int) -> str | None:
         if schema_id not in self._cache:
@@ -61,9 +61,10 @@ class RegistrySchemaResolver:
                     self._cache[schema_id] = json.loads(resp.read())["schema"]
             except urllib.error.HTTPError as exc:
                 if exc.code == 404:
-                    self._cache[schema_id] = None  # genuinely unknown id
-                else:
-                    raise  # registry unavailable: fail the batch, Spark retries it
+                    # Not cached: an id can be registered after we first see
+                    # it, and a cached miss would reject that version forever.
+                    return None
+                raise  # registry unavailable: fail the batch, Spark retries it
         return self._cache[schema_id]
 
 

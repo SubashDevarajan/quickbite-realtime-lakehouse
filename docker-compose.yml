@@ -48,6 +48,12 @@ services:
       KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
       KAFKA_LOG_RETENTION_HOURS: 168
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
+    volumes:
+      # Kafka must outlive `make down` just like the lakehouse does: the
+      # bronze checkpoint stores Kafka offsets, and the registry's schemas
+      # live in the _schemas topic.
+      - kafka-data:/var/lib/kafka/data
     healthcheck:
       test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server kafka:9092 > /dev/null 2>&1"]
       interval: 10s
@@ -161,3 +167,4 @@ services:
 
 volumes:
   lakehouse:
+  kafka-data:
