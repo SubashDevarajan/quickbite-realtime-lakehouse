@@ -141,11 +141,17 @@ def decode_confluent_avro(
             "_evt", from_avro(F.col("avro_payload"), schema_json, {"mode": "PERMISSIVE"})
         )
         evt_type = decoded.schema["_evt"].dataType
+        # PERMISSIVE mode returns a struct of all-NULL fields (not a NULL
+        # struct) for a payload it cannot decode.
+        any_field = F.lit(False)
+        for name in evt_type.fieldNames():
+            any_field = any_field | F.col(f"_evt.{name}").isNotNull()
+        failed = ~any_field
         parts.append(
             decoded.select(
                 *passthrough,
                 *_align("_evt", evt_type, target),
-                F.when(F.col("_evt").isNull(), F.lit(AVRO_DECODE_ERROR)).alias("decode_error"),
+                F.when(failed, F.lit(AVRO_DECODE_ERROR)).alias("decode_error"),
             )
         )
 
