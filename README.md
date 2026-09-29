@@ -14,6 +14,8 @@ lakehouse after chaos drills.
 
 ![CI](https://github.com/SubashDevarajan/quickbite-realtime-lakehouse/actions/workflows/ci.yml/badge.svg)
 
+![Live dashboard during a load test](docs/images/dashboard-overview.png)
+
 ---
 
 ## Architecture
@@ -134,15 +136,15 @@ drain, and reconciles the lakehouse against the generator's ground-truth manifes
 
 ```
 RESULTS
-  [PASS] no duplicate order events in silver               rows=41873 distinct_event_ids=41873
-  [PASS] no duplicate click events in silver               rows=180342 distinct_event_ids=180342
-  [PASS] orders_current never regressed a status           regressed_orders=0
-  [PASS] silver order events == unique valid produced      silver=41873 produced=41873
-  [PASS] silver click events == unique valid produced      silver=180342 produced=180342
-  [PASS] every malformed order_events record is in the DLQ dlq=2231 malformed_produced=2231
-  [PASS] every malformed clickstream record is in the DLQ  dlq=1905 malformed_produced=1905
+  [PASS] no duplicate order events in silver              rows=2042 distinct_event_ids=2042
+  [PASS] no duplicate click events in silver              rows=11805 distinct_event_ids=11805
+  [PASS] orders_current never regressed a status          regressed_orders=0
+  [PASS] silver order events == unique valid produced     silver=2042 produced=2042
+  [PASS] silver click events == unique valid produced     silver=11805 produced=11805
+  [PASS] every malformed order_events record is in the DLQ dlq=17 malformed_produced=17
+  [PASS] every malformed clickstream record is in the DLQ dlq=114 malformed_produced=114
 ```
-*(Counts depend on how long the generator has been running.)*
+*(Output after `make chaos-kill-silver`. Counts depend on how long the generator has been running.)*
 
 Run `make resume-generator` after each drill to start producing again.
 
@@ -154,6 +156,35 @@ Run `make resume-generator` after each drill to start producing again.
 | 4 | **Schema evolution** | `make schema-check` | The registry accepts v2 (optional field added) and rejects v3 (field renamed, required field added) |
 | 5 | **Load test** | `make benchmark` | About 1,200 events/s; read throughput and batch latency on the dashboard's *Pipeline health* panel |
 | 6 | **Small files** | `make maintain` | Compacts the thousands of files micro-batches create; logs file counts before and after |
+
+## Results
+
+Measured on a MacBook Air (Docker Desktop, 7.7 GB memory, 10 CPUs), all jobs in Spark local mode.
+
+| Metric | Value | How measured |
+|---|---|---|
+| Duplicates in silver after SIGKILL mid-batch | **0** | `make chaos-kill-silver`, then `make verify` |
+| Records lost after crash | **0** | Silver counts equal the generator's unique valid events |
+| Malformed records caught | **100%** (131 / 131) | DLQ vs the generator's manifest |
+| Bronze ingestion under load | **~1,200 events/s** sustained | `bronze_ingest` median input rate during `make benchmark` |
+| Small files compacted | **1,700 → 10** across 9 tables | `make maintain` log |
+
+Under the benchmark load, bronze kept up while `silver_orders` became the bottleneck: its
+per-batch `MERGE` grew to over a minute and the backlog drained in bounded batches once the
+load dropped. See [design decisions](docs/design-decisions.md#trigger-interval) for the latency trade-offs.
+
+![Pipeline health during the benchmark](docs/images/pipeline-health-benchmark.png)
+
+### Screenshots
+
+All taken during `make benchmark`, which is why Kafka → silver latency on the dashboard
+is high: silver was working through a backlog.
+
+| | |
+|---|---|
+| **Live SLA breaches and order status** | ![SLA breaches](docs/images/dashboard-sla.png) |
+| **Dead-letter queue by reason** | ![Dead-letter queue](docs/images/dead-letter-queue.png) |
+| **Kafka topics (Kafka UI)** | ![Kafka topics](docs/images/kafka-topics.png) |
 
 ---
 
